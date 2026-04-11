@@ -5,6 +5,35 @@
 // Input device configuration.
 // Find the full list of options on the wiki:
 // https://yalter.github.io/niri/Configuration:-Input
+// 顶层的blur配置，细节调整blur的效果
+environment {
+    QT_QPA_PLATFORMTHEME "qt5ct"
+    QT_QPA_PLATFORM "wayland"
+    GDK_BACKEND "wayland"
+    CLUTTER_BACKEND "wayland"
+}
+blur {
+    passes 3
+    offset 3
+    noise 0.02
+    saturation 1.5
+}
+// 全局窗口规则。让所有普通窗口以xray的形式显示blur。xray仅渲染一次模糊版本的背景，然后将其以类似“壁纸”的形式显示在窗口后面，不是实时渲染模糊，所以完全没有性能消耗。
+window-rule {
+    background-effect {
+        xray true
+        blur true
+    }
+}
+// 浮动窗口禁用xray，实时渲染模糊效果。否则浮动窗口会无视底下的其他窗口内容，直接显示透视到桌面壁纸。看个人喜好选择禁用与否吧。
+window-rule {
+    match is-floating=true
+    background-effect {
+        xray false
+        blur true
+    }
+}
+
 input {
     keyboard {
         xkb {
@@ -247,7 +276,6 @@ layout {
 spawn-at-startup "waybar"
 spawn-at-startup "sh" "-c" "/home/xuhuan/.local/bin/random-wallpaper-awww.sh"
 spawn-sh-at-startup "we-layerd run --config ~/.config/we-layerd/config.toml"
-spawn-at-startup "we-gui"
 spawn-at-startup "xsettingsd"
 spawn-at-startup "niriusd"
 spawn-at-startup "awww-daemon"
@@ -307,15 +335,21 @@ window-rule {
 
 // Open the Firefox picture-in-picture player as floating by default.
 window-rule {
+    match app-id="xdg-desktop-portal-gtk"
+    open-floating true
+}
+window-rule {
+    match title="we-gui"
+    open-floating true
+}
+window-rule {
     // This app-id regular expression will work for both:
     // - host Firefox (app-id is "firefox")
     // - Flatpak Firefox (app-id is "org.mozilla.firefox")
     match app-id=r#"firefox$"# title="^Picture-in-Picture$"
     match app-id="SPlayer"
     match app-id="org.vinegarhq.Sober"
-    match title="添加非Steam游戏"
     match app-id="waypaper"
-    match title="选择要加速的游戏程序"
     open-floating true
 }
 
@@ -356,6 +390,7 @@ binds {
     Mod+Shift+Slash { show-hotkey-overlay; }
     Mod+Shift+Q { spawn "nirius" "toggle-follow-mode"; }
     Mod+Alt+W {spawn "waypaper";}
+    Mod+Ctrl+W {spawn "we-gui";}
     Mod+Shift+C { spawn "sh" "-c" "/home/xuhuan/.local/bin/random-wallpaper-awww.sh"; }
     Mod+Shift+1 { move-window-to-workspace 1; }
     Mod+Shift+2 { move-window-to-workspace 2; }
