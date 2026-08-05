@@ -187,7 +187,88 @@ Section "Device"
     Identifier "AMD"
     Driver "modesetting"
     Option "TearFree" "true"
+EndSection
+EOF
 log "✅ 系统优化已应用"
+
+# 🌐 第十步半：GRUB 引导与美化 (hyperfluent 主题)
+log "配置 GRUB 引导与 hyperfluent 主题..."
+pacman -S --noconfirm --needed grub efibootmgr os-prober
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+THEME_SRC="${SCRIPT_DIR}/grub-themes/hyperfluent"
+THEME_DST="/boot/grub/themes/hyperfluent"
+
+# UEFI / BIOS 自动检测并安装 GRUB
+if [[ -d /sys/firmware/efi ]]; then
+    # 检测 EFI 分区挂载点
+    EFI_DIR=""
+    for d in /boot /efi /boot/efi; do
+        if [[ -d "$d/EFI" ]]; then EFI_DIR="$d"; break; fi
+    done
+    EFI_DIR="${EFI_DIR:-/boot}"
+    if ! grub-install --target=x86_64-efi --efi-directory="$EFI_DIR" --bootloader-id=Archlinux &>/dev/null; then
+        warn "grub-install 失败，请检查 EFI 挂载点 (当前尝试: $EFI_DIR)"
+    else
+        log "✅ GRUB 已安装到 EFI ($EFI_DIR)"
+    fi
+else
+    grub-install /dev/nvme0n1 2>/dev/null || warn "GRUB 安装失败（BIOS 模式），请手动指定磁盘"
+fi
+
+# 复制 hyperfluent 主题
+mkdir -p /boot/grub/themes
+if [[ -d "$THEME_SRC" ]]; then
+    cp -r "$THEME_SRC" /boot/grub/themes/
+    chmod -R 755 /boot/grub/themes/hyperfluent
+    log "✅ hyperfluent 主题已复制到 /boot/grub/themes/"
+else
+    warn "未找到 ${THEME_SRC}，跳过主题配置"
+fi
+
+# 写入 /etc/default/grub（复刻当前配置）
+cat > /etc/default/grub << 'EOF'
+#boot loader configuration
+
+GRUB_DEFAULT=saved
+GRUB_TIMEOUT=5
+GRUB_DISTRIBUTOR="Arch"
+GRUB_CMDLINE_LINUX_DEFAULT="loglevel=3 quiet splash zswap.enabled=0"
+GRUB_CMDLINE_LINUX=""
+
+# Preload both GPT and MBR modules so that they are not missed
+GRUB_PRELOAD_MODULES="part_gpt part_msdos"
+
+# Set to 'countdown' or 'hidden' to change timeout behavior,
+# press ESC key to display menu.
+GRUB_TIMEOUT_STYLE=menu
+
+# The resolution used on graphical terminal
+GRUB_GFXMODE=auto
+
+# Uncomment to allow the kernel use the same resolution used by grub
+GRUB_GFXPAYLOAD_LINUX=keep
+
+# Uncomment to disable generation of recovery mode menu entries
+GRUB_DISABLE_RECOVERY=true
+
+# GRUB Theme: hyperfluent
+GRUB_THEME="/boot/grub/themes/hyperfluent/theme.txt"
+
+# Make GRUB remember the last selection
+GRUB_SAVEDEFAULT=true
+
+# Probing for other operating systems (Windows dual-boot)
+GRUB_DISABLE_OS_PROBER=false
+EOF
+log "✅ /etc/default/grub 已配置 (hyperfluent 主题)"
+
+# 生成 grub.cfg
+if grub-mkconfig -o /boot/grub/grub.cfg; then
+    log "✅ grub.cfg 已生成"
+else
+    warn "grub-mkconfig 失败，请手动执行"
+fi
 
 # 🧊 第十一点五步：Ryzen 温控墙 (CPU 功耗/温度限制)
 log "配置 Ryzen 5 5500U 温控墙..."
@@ -231,6 +312,7 @@ systemctl enable ryzenadj-optimization.service
 log "✅ Ryzen 温控墙已配置并设为开机自启"
 
 # 🖼️ 第十一步：壁纸设置
+if [[ -d "${HOME_DIR}/wallpapers" ]]; then
     log "检测到壁纸目录 ~/wallpapers"
     WALLPAPER=$(find "${HOME_DIR}/wallpapers" -type f \( -name "*.jpg" -o -name "*.png" \) | shuf -n 1)
     if [[ -n "$WALLPAPER" ]]; then
@@ -266,5 +348,6 @@ info "  ✅ OBS / mpv / VLC 多媒体"
 info "  ✅ btop/fastfetch 监控工具"
 info "  ✅ SSH + NetworkManager 网络服务"
 info "  ✅ 壁纸轮换"
+info "  ✅ GRUB + hyperfluent 主题美化"
 
 exit 0
