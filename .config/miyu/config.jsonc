@@ -1,0 +1,299 @@
+{
+  "active_provider": "opencode",
+  "active_provider_models": [
+    {
+      "provider_id": "opencode",
+      "model": "deepseek-v4-flash-free"
+    }
+  ],
+  "active_multimodal_provider_models": [
+    {
+      "provider_id": "opencode",
+      "model": "mimo-v2.5-free"
+    }
+  ],
+  "providers": [
+    {
+      "id": "opencode",
+      "display_name": "opencode Zen",
+      "base_url": "https://opencode.ai/zen/v1",
+      "models": [
+        "deepseek-v4-flash-free",
+        "mimo-v2.5-free",
+        "ling-3.0-flash-free",
+        "nemotron-3-ultra-free",
+        "north-mini-code-free",
+        "laguna-s-2.1-free"
+      ],
+      "model_context_window": {
+        "big-pickle": 272000
+      },
+      "model_modalities": {
+        "nemotron-3-ultra-free": [
+          "text"
+        ],
+        "mimo-v2.5-free": [
+          "text",
+          "image",
+          "audio",
+          "video"
+        ],
+        "laguna-s-2.1-free": [
+          "text"
+        ],
+        "deepseek-v4-flash-free": [
+          "text"
+        ],
+        "ling-3.0-flash-free": [
+          "text"
+        ],
+        "north-mini-code-free": [
+          "text"
+        ],
+        "deepseek-v4-pro": [
+          "text"
+        ]
+      },
+      "default_model": "deepseek-v4-flash-free"
+    },
+    {
+      "id": "openai",
+      "display_name": "OpenAI",
+      "base_url": "https://api.openai.com/v1"
+    },
+    {
+      "id": "anthropic",
+      "display_name": "Anthropic",
+      "base_url": "https://api.anthropic.com/v1",
+      "protocol": "anthropic",
+      "api_key": "$env:ANTHROPIC_API_KEY"
+    },
+    {
+      "id": "deepseek",
+      "display_name": "DeepSeek",
+      "base_url": "https://api.deepseek.com"
+    },
+    {
+      "id": "gemini",
+      "display_name": "Gemini",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai"
+    },
+    {
+      "id": "xiaomi",
+      "display_name": "Xiaomi",
+      "base_url": "https://token-plan-sgp.xiaomimimo.com/v1"
+    },
+    {
+      "id": "minimax",
+      "display_name": "Minimax",
+      "base_url": "https://api.minimaxi.com/v1"
+    },
+    {
+      "id": "openrouter",
+      "display_name": "OpenRouter",
+      "base_url": "https://openrouter.ai/api/v1"
+    },
+    {
+      "id": "ollama",
+      "display_name": "Ollama",
+      "base_url": "http://localhost:11434/v1"
+    },
+    {
+      "id": "lmstudio",
+      "display_name": "LMStudio",
+      "base_url": "http://localhost:1234/v1"
+    }
+  ],
+  "context": {
+    "trim_at_ratio": 0.9,
+    "trim_batch_ratio": 0.15,
+    "on_overflow": "compact"
+  },
+  "tools": {
+    "enabled": true,
+    "max_rounds": 0,
+    "loading_mode": "hybrid",
+    "persist_loaded_tools": true
+  },
+  "mcp": {
+    "enabled": false,
+    "servers": []
+  },
+  "skills": {
+    "enabled": true,
+    "allow_command_execution": true
+  },
+  "display": {
+    "language": "auto",
+    "reasoning": "summary",
+    "tool_calls": "summary",
+    "readable_tool_names": true,
+    "show_token_usage": false,
+    "mixed_model_endpoint_display": "all",
+    "command_output_lines": 10
+  },
+  "prompt": {
+    "prompts_dir": "prompts",
+    "identities_dir": "identities",
+    "user_identity_file": "user-identity.md",
+    "active_persona": "var&qin&fei&mo xi.md",
+    "active_identity": "xuhuan.md"
+  },
+  "plugins": {
+    "weather": {
+      "enabled": true
+    },
+    "web": {
+      "enabled": true,
+      "max_results": 2,
+      "tavily_api_keys": [],
+      "firecrawl_api_keys": [],
+      "anysearch_api_keys": [],
+      "searxng_base_url": ""
+    },
+    "web_images": {
+      "enabled": true,
+      "source_mode": "auto",
+      "max_results": 5,
+      "max_download_mb": 4.0,
+      "safe_search": true,
+      "vision_screening_enabled": true,
+      "auto_preview": true,
+      "preview_count": 1,
+      "timeout_seconds": 20
+    },
+    "deep_research": {
+      "enabled": true,
+      "output_dir": "/home/xuhuan/文档/Miyu/deep-thinking",
+      "thinking_depth": "high",
+      "max_review_revisions": 0,
+      "max_tool_steps_per_round": 0,
+      "max_final_answer_chars": 0,
+      "tool_call_timeout_seconds": 90,
+      "show_progress": true
+    },
+    "deep_diagnose": {
+      "enabled": true,
+      "thinking_depth": "high",
+      "max_review_revisions": 0,
+      "max_tool_steps_per_round": 0,
+      "max_final_answer_chars": 0,
+      "tool_call_timeout_seconds": 90,
+      "max_tool_steps": 100,
+      "show_progress": true
+    },
+    "vision": {
+      "enabled": true,
+      "prefer_current_multimodal_model": true,
+      "vision_provider_id": "",
+      "vision_model": "",
+      "preview_with_chafa": true
+    },
+    "exchange_rate": {
+      "enabled": false,
+      "api_key": "",
+      "free_fallback_enabled": true
+    },
+    "xuanxue": {
+      "enabled": true
+    },
+    "image_generation": {
+      "enabled": false,
+      "provider_type": "openai",
+      "base_url": "https://api.openai.com",
+      "api_keys": [],
+      "model": "gpt-image-1",
+      "default_aspect_ratio": "自动",
+      "default_resolution": "1K",
+      "output_dir": "/home/xuhuan/图片/miyu/generated-images",
+      "auto_print": true,
+      "timeout_seconds": 180
+    },
+    "print_image": {
+      "enabled": true,
+      "width_percent": 45,
+      "height_percent": 35
+    },
+    "memes": {
+      "enabled": true,
+      "persona_libraries": {},
+      "width_percent": 35,
+      "height_percent": 25,
+      "max_image_mb": 10,
+      "search_max_results": 1,
+      "allow_gif_animation": false,
+      "auto_send_enabled": false,
+      "auto_send_probability": 0.2
+    },
+    "knowledge_base": {
+      "enabled": true,
+      "data_dir": "",
+      "max_search_results": 5,
+      "snippet_context_chars": 240,
+      "proximity_window_chars": 512,
+      "max_read_lines": 200,
+      "max_file_size_kb": 1024,
+      "allowed_extensions": ".txt,.md,.json,.jsonc,.json5,.yaml,.yml,.csv,.log,.py,.js,.ts,.jsx,.tsx,.mjs,.cjs,.html,.css,.scss,.sass,.less,.cfg,.ini,.conf,.toml,.kdl,.desktop,.service,.timer,.socket,.target,.mount,.rules,.network,.netdev,.properties,.hjson,.ron,.rst,.xml,.sh,.bash,.zsh,.fish,.nu,.ps1,.lua,.nix,.rasi,.yuck,.sql,.rs,.go,.c,.h,.cpp,.hpp,.java,.kt,.php,.rb,.pl,.org,.adoc,.tex",
+      "allowed_filenames": ".env,.env.local,.env.example,.env.sample,.envrc,.editorconfig,.gitignore,.gitattributes,.npmrc,.vimrc,.bashrc,.zshrc,.profile,.xinitrc,.xresources,config,dockerfile,containerfile,makefile,justfile,procfile,pkgbuild",
+      "upload_tool_enabled": true,
+      "embedding_enabled": false,
+      "embedding_provider_id": "",
+      "embedding_model": "",
+      "semantic_chunk_chars": 512,
+      "semantic_chunk_overlap": 80,
+      "semantic_top_k": 5,
+      "semantic_min_score": 0.25,
+      "keyword_strong_score_threshold": 180.0,
+      "embedding_timeout_seconds": 60
+    },
+    "archlinux": {
+      "enabled": true
+    },
+    "man": {
+      "enabled": true
+    },
+    "moegirl": {
+      "enabled": true
+    },
+    "hash_codec": {
+      "enabled": true
+    },
+    "calculator": {
+      "enabled": false,
+      "backend": "rust-simple"
+    },
+    "package_advisor": {
+      "enabled": true
+    },
+    "deep_research_linux_game_compatibility": {
+      "enabled": true,
+      "max_tool_steps": 100
+    },
+    "diagnostics": {
+      "enabled": true,
+      "command_timeout_seconds": 5,
+      "max_stdout_chars": 8000,
+      "max_stderr_chars": 4000
+    },
+    "memory": {
+      "enabled": true,
+      "evicted_context_enabled": true,
+      "association_enabled": true,
+      "auto_diary_enabled": true,
+      "auto_fact_enabled": true,
+      "auto_skill_enabled": false,
+      "association_facts": 5,
+      "association_episodes": 3,
+      "association_max_chars": 1800,
+      "snippet_chars": 500,
+      "forget_after_days": 90,
+      "forgetting_enabled": true,
+      "forgetting_half_life_days": 7.0,
+      "forgetting_min_strength": 0.15,
+      "forgetting_review_boost": 0.35,
+      "learning_min_task_chars": 16,
+      "learning_min_method_chars": 120
+    }
+  },
+  "system_prompt_file": "system-prompt.md"
+}
