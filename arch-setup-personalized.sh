@@ -1,7 +1,9 @@
 #!/bin/bash
 # arch-setup-personalized.sh - 为你的真实机器定制的 Arch Linux 一键配置脚本
 # 作者: qin
-# 适用: AMD Ryzen 5 5500U / Niri + Waybar / btrfs
+# 适用: AMD Ryzen 5 5500U / Niri + Waybar + i3(X11) / btrfs
+# 仓库: https://github.com/2112992430/xuhuan-config
+# 用法: sudo ./arch-setup-personalized.sh
 
 set -euo pipefail
 
@@ -18,6 +20,26 @@ error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 info()  { echo -e "${BLUE}[NOTE]${NC} $1"; }
 
+# 🔁 重试函数：下载/安装命令失败后自动重新执行，直到成功
+# 用法: retry <命令...>   默认无限重试；设置环境变量 RETRY_MAX=N 可限制次数
+retry() {
+    local attempts=0
+    local max="${RETRY_MAX:-0}"   # 0 = 无限重试
+    while true; do
+        attempts=$((attempts + 1))
+        if "$@"; then
+            [[ $attempts -gt 1 ]] && log "✅ 命令在第 ${attempts} 次尝试时成功: $*"
+            return 0
+        fi
+        warn "⚠️ 命令失败 (第 ${attempts} 次)，3 秒后自动重试: $*"
+        if [[ "$max" -gt 0 && "$attempts" -ge "$max" ]]; then
+            error "命令在 ${max} 次尝试后仍失败: $*"
+            return 1
+        fi
+        sleep 3
+    done
+}
+
 # ✅ 检查 root
 if [[ $EUID -ne 0 ]]; then
     error "此脚本需要 root 权限运行: sudo $0"
@@ -33,6 +55,10 @@ if [[ "$REAL_USER" == "root" ]]; then
 fi
 log "检测到用户: ${REAL_USER} (家目录: ${HOME_DIR})"
 
+# 脚本所在目录（即 xuhuan-config 仓库根目录）
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+log "配置仓库目录: ${SCRIPT_DIR}"
+
 # 确认是否继续
 read -r -p "确认开始配置? [y/N] " ans
 [[ "$ans" == "y" || "$ans" == "Y" ]] || { info "已取消"; exit 0; }
@@ -40,14 +66,118 @@ read -r -p "确认开始配置? [y/N] " ans
 # ⏱️ 计时
 START_TIME=$(date +%s)
 
+# 🌏 第零步：DNS 配置（1.1.1.1 / 8.8.8.8）— 必须在所有下载和网络操作之前
+log "配置 DNS (主 1.1.1.1 / 备用 8.8.8.8)..."
+
+# 0.0.1 如果 nmcli 可用，遍历所有连接统一设置
+if command -v nmcli >/dev/null 2>&1; then
+    nmcli -t -f NAME connection show 2>/dev/null | while IFS= read -r conn; do
+        if [[ -n "$conn" ]]; then
+            nmcli connection modify "$conn" \
+                ipv4.dns "1.1.1.1 8.8.8.8" \
+                ipv4.ignore-auto-dns yes 2>/dev/null \
+                && log "  ✅ $conn 已设置 DNS" \
+                || warn "  跳过 $conn (无 ipv4 设置或不可修改)"
+        fi
+    done
+    # 重启 NetworkManager 使 DNS 生效（若服务存在）
+    systemctl restart NetworkManager 2>/dev/null && log "✅ NetworkManager 已重启，DNS 生效" || true
+else
+    # 0.0.2 nmcli 不可用（全新系统未装 NetworkManager），直接写 resolv.conf
+    warn "nmcli 不可用，直接写入 /etc/resolv.conf..."
+    cp /etc/resolv.conf /etc/resolv.conf.bak 2>/dev/null || true
+    cat > /etc/resolv.conf << 'EOF'
+nameserver 1.1.1.1
+nameserver 8.8.8.8
+EOF
+    log "✅ /etc/resolv.conf 已直接写入 1.1.1.1 / 8.8.8.8 (备份: /etc/resolv.conf.bak)"
+fi
+
+log "✅ DNS 配置完成，后续所有下载/网络操作将使用 1.1.1.1 / 8.8.8.8"
+
+# 🌏 第零步：ArchLinuxCN 源 + 镜像源 + paru
+log "配置 ArchLinuxCN 源与镜像源..."
+
+# 0.1 添加 ArchLinuxCN 源 (使用当前系统的官方源 repo.archlinuxcn.org)
+log "配置 ArchLinuxCN 源..."
+if ! grep -q "^\[archlinuxcn\]" /etc/pacman.conf; then
+    cp /etc/pacman.conf /etc/pacman.conf.bak
+    cat >> /etc/pacman.conf << 'EOF'
+
+[archlinuxcn]
+Server = https://repo.archlinuxcn.org/$arch
+EOF
+    log "✅ ArchLinuxCN 已添加 (官方源 repo.archlinuxcn.org, 备份: /etc/pacman.conf.bak)"
+else
+    log "✅ ArchLinuxCN 源已存在"
+fi
+
+# 0.2 安装 reflector 并生成最快镜像列表
+log "安装 reflector 并获取最快镜像源..."
+retry pacman -S --noconfirm --needed reflector
+if reflector --country China --latest 20 --protocol https --sort rate --fastest 10 --save /etc/pacman.d/mirrorlist 2>/dev/null; then
+    log "✅ 已用 reflector 生成国内镜像列表 (Top 10)"
+else
+    warn "国内镜像获取失败，使用全局镜像排序..."
+    reflector --protocol https --sort rate --fastest 10 --save /etc/pacman.d/mirrorlist 2>/dev/null \
+        && log "✅ 已用 reflector 生成全局镜像列表" \
+        || warn "reflector 失败，保留原镜像列表"
+fi
+
+# 0.3 刷新数据库并安装 archlinuxcn-keyring + paru
+log "刷新 pacman 数据库..."
+retry pacman -Sy --noconfirm
+
+log "安装 archlinuxcn-keyring 与 paru..."
+# 首次安装 archlinuxcn-keyring 前，先信任 cn 源主密钥（否则会报 unknown public key）
+pacman-key --recv-keys 5E351FAF0F6E0A7E 2>/dev/null || true
+pacman-key --lsign-key 5E351FAF0F6E0A7E 2>/dev/null || true
+if retry pacman -S --noconfirm --needed archlinuxcn-keyring paru; then
+    log "✅ paru 已安装 (AUR 助手)"
+else
+    # 仅当设置了 RETRY_MAX 且超限时才会走到这里
+    warn "从 ArchLinuxCN 安装 paru 失败，尝试 AUR 手动编译..."
+    retry pacman -S --noconfirm --needed base-devel git
+    rm -rf /tmp/paru-build
+    retry sudo -H -u "${REAL_USER}" git clone https://aur.archlinux.org/paru.git /tmp/paru-build
+    if cd /tmp/paru-build && retry sudo -H -u "${REAL_USER}" makepkg -si --noconfirm; then
+        log "✅ paru 已通过 AUR 手动编译安装"
+    else
+        warn "paru 安装失败，请安装后手动执行: paru -Syu"
+    fi
+    cd /
+fi
+
+# 0.4 启用 multilib 仓库（steam/wine/lutris/lib32 系列依赖）
+log "启用 multilib 仓库..."
+if ! grep -q "^\[multilib\]" /etc/pacman.conf; then
+    # 若存在被注释的 [multilib] 段则取消注释，否则追加
+    if grep -q "^#\[multilib\]" /etc/pacman.conf; then
+        sed -i 's/^#\[multilib\]/[multilib]/' /etc/pacman.conf
+        sed -i 's|^#Include = /etc/pacman.d/mirrorlist|Include = /etc/pacman.d/mirrorlist|' /etc/pacman.conf
+    else
+        cat >> /etc/pacman.conf << 'EOF'
+
+[multilib]
+Include = /etc/pacman.d/mirrorlist
+EOF
+    fi
+    retry pacman -Sy --noconfirm
+    log "✅ multilib 仓库已启用"
+else
+    log "✅ multilib 仓库已启用"
+fi
+
 # 🚀 第一步：系统更新与基础工具
 log "更新系统与密钥环..."
-pacman -Sy --noconfirm archlinux-keyring || true
-pacman -Syu --noconfirm --needed \
+retry pacman -Sy --noconfirm archlinux-keyring
+retry pacman -Syu --noconfirm --needed \
     bash bash-completion \
     git vim curl wget unzip zip p7zip \
     btrfs-progs \
-    linux-zen-headers amd-ucode \
+    linux-zen linux-zen-headers \
+    linux-lts linux-lts-headers \
+    amd-ucode \
     networkmanager wpa_supplicant \
     bluez bluez-utils \
     pipewire pipewire-alsa pipewire-pulse pipewire-jack \
@@ -55,18 +185,32 @@ pacman -Syu --noconfirm --needed \
     man-db man-pages \
     sudo
 
+# 重新生成 boot 配置（新内核安装后 GRUB/mkinitcpio 需要刷新）
+log "重新生成 boot 配置..."
+if command -v grub-mkconfig >/dev/null 2>&1; then
+    grub-mkconfig -o /boot/grub/grub.cfg 2>/dev/null || true
+fi
+mkinitcpio -P 2>/dev/null || true
+log "✅ zen + lts 内核及 amd-ucode 已安装"
+
 # 🐧 第二步：用户权限配置
 log "配置用户权限..."
-usermod -aG wheel,audio,video,storage,input "${REAL_USER}" || true
+# 确保目标组存在（全新系统可能没有这些组）
+for g in network disk input kvm libvirt tun dialout gamemode; do
+    groupadd -f "$g" || true
+done
+# 加入当前 xuhuan 用户所在的组（wheel,network,disk,input,kvm,libvirt,tun,dialout,gamemode；不含 ollama）
+usermod -aG wheel,network,disk,input,kvm,libvirt,tun,dialout,gamemode "${REAL_USER}" || true
 if ! grep -q "^%wheel ALL=(ALL:ALL) ALL" /etc/sudoers; then
     echo "%wheel ALL=(ALL:ALL) ALL" >> /etc/sudoers.d/99-wheel
     chmod 440 /etc/sudoers.d/99-wheel
     log "✅ wheel 组已获得 sudo 权限"
 fi
+log "✅ 用户已加入: wheel,network,disk,input,kvm,libvirt,tun,dialout,gamemode"
 
-# 🖥️ 第三步：桌面环境 (Niri + Waybar)
+# 🖥️ 第三步：桌面环境 (Niri + Waybar + i3/X11)
 log "安装桌面环境..."
-pacman -S --noconfirm --needed \
+retry pacman -S --noconfirm --needed \
     niri \
     waybar \
     foot \
@@ -75,43 +219,129 @@ pacman -S --noconfirm --needed \
     xwayland \
     libinput \
     mesa vulkan-radeon libva-mesa-driver \
+    xf86-video-amdgpu vulkan-mesa-layer vulkan-tools libva-utils \
     xdg-desktop-portal xdg-desktop-portal-gnome \
     polkit polkit-kde-agent \
     swaybg grim slurp wl-clipboard \
-    mako
+    mako \
+    i3-wm i3status dmenu rofi \
+    xorg-xinit xorg-server xorg-xrandr \
+    xdotool ydotool wev \
+    zenity
 
-# 复制 niri 配置
-log "配置 Niri..."
-mkdir -p "${HOME_DIR}/.config/niri"
-if [[ -f "${HOME_DIR}/.config/niri/config.kdl" ]]; then
-    info "✅ 已存在 niri 配置，保留"
+# --- 克隆 xuhuan-config 仓库（桌面环境安装完成后） ---
+log "克隆 xuhuan-config 仓库..."
+REPO_DIR="${HOME_DIR}/xuhuan-config"
+if [[ -d "${REPO_DIR}/.git" ]]; then
+    log "✅ ${REPO_DIR} 已存在，跳过克隆"
+elif command -v git >/dev/null 2>&1; then
+    log "开始克隆 xuhuan-config 仓库（失败将自动重试）..."
+    clone_attempt=0
+    while true; do
+        clone_attempt=$((clone_attempt + 1))
+        if sudo -H -u "${REAL_USER}" git clone https://github.com/2112992430/xuhuan-config "${REPO_DIR}" 2>/dev/null; then
+            log "✅ 仓库已克隆到 ${REPO_DIR}（第 ${clone_attempt} 次尝试成功）"
+            break
+        else
+            warn "⚠️  第 ${clone_attempt} 次克隆失败，5 秒后重试..."
+            rm -rf "${REPO_DIR}"
+            sleep 5
+        fi
+    done
 else
-    niri msg action do-nothing 2>/dev/null || true
+    warn "未找到 git，回退使用脚本所在目录"
+    REPO_DIR="${SCRIPT_DIR}"
 fi
 
-# 复制 waybar 配置
-mkdir -p "${HOME_DIR}/.config/waybar"
-if [[ ! -f "${HOME_DIR}/.config/waybar/config.jsonc" ]]; then
-    cat > "${HOME_DIR}/.config/waybar/config.jsonc" << 'EOF'
-{
-    "layer": "top",
-    "position": "top",
-    "modules-left": ["niri/workspaces"],
-    "modules-center": ["clock"],
-    "modules-right": ["network", "cpu", "memory", "battery", "tray"],
-    "clock": { "format": "{:%Y-%m-%d %H:%M}" },
-    "network": { "format-wifi": " {essid}", "format-ethernet": " {ifname}" },
-    "cpu": { "format": " {usage}%" },
-    "memory": { "format": " {}%" },
-    "battery": { "format": " {capacity}%" }
-}
-EOF
-    log "✅ waybar 默认配置已生成"
+# --- 复制 niri 配置（从仓库） ---
+log "复制 Niri 配置..."
+mkdir -p "${HOME_DIR}/.config/niri"
+if [[ -f "${REPO_DIR}/.config/niri/config.kdl" ]]; then
+    cp "${REPO_DIR}/.config/niri/config.kdl" "${HOME_DIR}/.config/niri/config.kdl"
+    chown -R "${REAL_USER}:${REAL_USER}" "${HOME_DIR}/.config/niri"
+    log "✅ niri 配置已从仓库复制"
+else
+    warn "仓库中未找到 .config/niri/config.kdl，跳过"
 fi
+
+# --- 复制 waybar 配置（从仓库，含 scripts） ---
+log "复制 Waybar 配置..."
+mkdir -p "${HOME_DIR}/.config/waybar"
+if [[ -d "${REPO_DIR}/.config/waybar" ]]; then
+    cp -r "${REPO_DIR}/.config/waybar/." "${HOME_DIR}/.config/waybar/"
+    chmod +x "${HOME_DIR}"/.config/waybar/scripts/*.sh 2>/dev/null || true
+    chown -R "${REAL_USER}:${REAL_USER}" "${HOME_DIR}/.config/waybar"
+    log "✅ waybar 配置已从仓库复制 (含 scripts)"
+else
+    warn "仓库中未找到 .config/waybar，跳过"
+fi
+
+# --- 复制 i3 配置（从仓库） ---
+log "复制 i3 配置..."
+mkdir -p "${HOME_DIR}/.config/i3"
+if [[ -f "${REPO_DIR}/.config/i3/config" ]]; then
+    cp "${REPO_DIR}/.config/i3/config" "${HOME_DIR}/.config/i3/config"
+    chown -R "${REAL_USER}:${REAL_USER}" "${HOME_DIR}/.config/i3"
+    log "✅ i3 配置已从仓库复制"
+else
+    warn "仓库中未找到 .config/i3/config，跳过"
+fi
+
+# --- 复制 kitty 配置 ---
+log "复制 kitty 配置..."
+mkdir -p "${HOME_DIR}/.config/kitty"
+if [[ -f "${REPO_DIR}/.config/kitty/kitty.conf" ]]; then
+    cp "${REPO_DIR}/.config/kitty/kitty.conf" "${HOME_DIR}/.config/kitty/kitty.conf"
+    chown -R "${REAL_USER}:${REAL_USER}" "${HOME_DIR}/.config/kitty"
+    log "✅ kitty 配置已从仓库复制"
+fi
+
+# --- 复制 mako 配置 ---
+log "复制 mako 配置..."
+mkdir -p "${HOME_DIR}/.config/mako"
+if [[ -d "${REPO_DIR}/.config/mako" ]]; then
+    cp -r "${REPO_DIR}/.config/mako/." "${HOME_DIR}/.config/mako/"
+    chown -R "${REAL_USER}:${REAL_USER}" "${HOME_DIR}/.config/mako"
+    log "✅ mako 配置已从仓库复制"
+fi
+
+# --- 安装 miyu（终端 AI 助手，AUR 包） ---
+log "安装 miyu (AUR)..."
+if command -v miyu >/dev/null 2>&1; then
+    log "✅ miyu 已安装"
+elif command -v paru >/dev/null 2>&1; then
+    retry sudo -H -u "${REAL_USER}" paru -S --noconfirm --needed miyu
+    log "✅ miyu 已通过 paru 安装 (AUR)"
+else
+    warn "未找到 paru，跳过 miyu 安装，请稍后手动执行: paru -S miyu"
+fi
+
+# --- 复制 miyu 配置（AI 助手人格） ---
+log "复制 miyu 配置..."
+mkdir -p "${HOME_DIR}/.config/miyu"
+if [[ -d "${REPO_DIR}/.config/miyu" ]]; then
+    cp -r "${REPO_DIR}/.config/miyu/." "${HOME_DIR}/.config/miyu/"
+    chown -R "${REAL_USER}:${REAL_USER}" "${HOME_DIR}/.config/miyu"
+    log "✅ miyu 配置已从仓库复制"
+fi
+
+# --- 安装 yautoclick（GUI 连点器，依赖 ydotool） ---
+log "安装 yautoclick (GUI 连点器, AUR)..."
+if command -v yautoclick >/dev/null 2>&1; then
+    log "✅ yautoclick 已安装"
+elif command -v paru >/dev/null 2>&1; then
+    retry sudo -H -u "${REAL_USER}" paru -S --noconfirm --needed yautoclick
+    log "✅ yautoclick 已安装 (AUR)"
+else
+    warn "未找到 paru，跳过 yautoclick 安装，请稍后手动执行: paru -S yautoclick"
+fi
+# 启用 ydotool 服务（yautoclick 后端依赖）
+systemctl enable ydotool.service 2>/dev/null || true
+log "✅ ydotool 服务已启用 (连点器后端)"
 
 # 🐱 第四步：输入法 Fcitx5
 log "安装配置 Fcitx5..."
-pacman -S --noconfirm --needed \
+retry pacman -S --noconfirm --needed \
     fcitx5 fcitx5-chinese-addons fcitx5-configtool \
     fcitx5-gtk fcitx5-qt \
     fcitx5-material-color
@@ -126,46 +356,77 @@ GLFW_IM_MODULE=fcitx
 EOF
 log "✅ fcitx5 环境变量已写入 /etc/environment"
 
-# 🐳 第五步：虚拟化
+# 🖥️ 第四步半：X11 会话配置 (startx → i3，含中文输入法修复)
+log "配置 X11 会话 (.xinitrc / .xprofile)..."
+cat > "${HOME_DIR}/.xinitrc" << EOF
+#!/bin/sh
+# X11 会话启动 (startx → i3)
+# 注意: startx 只读 .xinitrc，不读 .xprofile，所以变量必须在这里
+export GTK_IM_MODULE=fcitx
+export QT_IM_MODULE=fcitx
+export XMODIFIERS=@im=fcitx
+export SDL_IM_MODULE=fcitx
+export GLFW_IM_MODULE=fcitx
+exec i3
+EOF
+cat > "${HOME_DIR}/.xprofile" << EOF
+#!/bin/sh
+# X11 会话环境变量 (Display Manager 登录时读取)
+export GTK_IM_MODULE=fcitx
+export QT_IM_MODULE=fcitx
+export XMODIFIERS=@im=fcitx
+export SDL_IM_MODULE=fcitx
+export GLFW_IM_MODULE=fcitx
+EOF
+chmod +x "${HOME_DIR}/.xinitrc" "${HOME_DIR}/.xprofile"
+chown "${REAL_USER}:${REAL_USER}" "${HOME_DIR}/.xinitrc" "${HOME_DIR}/.xprofile"
+log "✅ .xinitrc/.xprofile 已配置 (i3 + fcitx5)"
+
+# 🐳 第五步：虚拟化 + jiasuqi 虚拟机脚本
 log "设置虚拟化..."
-pacman -S --noconfirm --needed libvirt virt-manager qemu-desktop dnsmasq
-systemctl enable libvirtd.service
+retry pacman -S --noconfirm --needed libvirt virt-manager qemu-full dnsmasq virt-viewer
+systemctl enable libvirtd.service || true
 log "✅ libvirtd 已启用"
+
+log "复制 jiasuqi 虚拟机脚本..."
+if [[ -d "${REPO_DIR}/jiasuqi" ]]; then
+    mkdir -p "${HOME_DIR}/jiasuqi"
+    cp -r "${REPO_DIR}/jiasuqi/." "${HOME_DIR}/jiasuqi/"
+    chmod +x "${HOME_DIR}/jiasuqi/vm-cli.sh" 2>/dev/null || true
+    chown -R "${REAL_USER}:${REAL_USER}" "${HOME_DIR}/jiasuqi"
+    log "✅ jiasuqi 已复制 (vm-cli.sh + linux/jiasuqi.conf)"
+else
+    warn "仓库中未找到 jiasuqi/，跳过"
+fi
 
 # 👾 第六步：游戏与多媒体
 log "安装游戏与多媒体..."
-pacman -S --noconfirm --needed \
+retry pacman -S --noconfirm --needed \
     steam \
     wine winetricks \
+    lutris \
     obs-studio \
     mpv vlc ffmpeg \
     gamemode lib32-gamemode \
-    mangohud lib32-mangohud
+    mangohud lib32-mangohud \
+    steam-devices
 
-# 📱 第七步：WayDroid
-if ! command -v waydroid &>/dev/null; then
-    log "安装 WayDroid..."
-    pacman -S --noconfirm --needed waydroid
-    waydroid init -s GAPPS || true
-fi
-waydroid prop set persist.waydroid.fake_wifi 1 || true
-waydroid prop set persist.waydroid.fake_touch 1 || true
-log "✅ WayDroid 假触控/假WiFi 已设置"
-
-# 📁 第八步：文件管理与系统工具
+# 📁 第七步：文件管理与系统工具
 log "安装文件管理与监控工具..."
-pacman -S --noconfirm --needed \
+retry pacman -S --noconfirm --needed \
     thunar gvfs file-roller tumbler ffmpegthumbnailer \
     btop htop fastfetch \
     acpi lm_sensors smartmontools iotop nethogs \
     dnsutils iputils net-tools openssh rsync \
+    ipset iptables iproute2 \
     gzip bzip2 xz zstd \
+    aria2 \
     neofetch
 
-# 🌐 第九步：网络与主机名
+# 🌐 第八步：网络与主机名
 log "配置网络..."
 hostnamectl set-hostname arch-pc || true
-systemctl enable NetworkManager.service
+systemctl enable NetworkManager.service || true
 systemctl enable sshd.service || true
 if [[ ! -f "${HOME_DIR}/.ssh/id_ed25519" ]]; then
     mkdir -p "${HOME_DIR}/.ssh"
@@ -174,13 +435,11 @@ if [[ ! -f "${HOME_DIR}/.ssh/id_ed25519" ]]; then
     log "✅ SSH 密钥已生成"
 fi
 
-# 📊 第十步：系统优化
+# 📊 第九步：系统优化
 log "优化系统..."
-# swappiness
 if ! grep -q "vm.swappiness" /etc/sysctl.d/99-custom.conf 2>/dev/null; then
     echo "vm.swappiness=30" >> /etc/sysctl.d/99-custom.conf
 fi
-# AMD GPU 配置
 mkdir -p /etc/X11/xorg.conf.d
 cat > /etc/X11/xorg.conf.d/20-amdgpu.conf << 'EOF'
 Section "Device"
@@ -191,17 +450,15 @@ EndSection
 EOF
 log "✅ 系统优化已应用"
 
-# 🌐 第十步半：GRUB 引导与美化 (hyperfluent 主题)
+# 🌐 第十步：GRUB 引导与美化 (hyperfluent 主题)
 log "配置 GRUB 引导与 hyperfluent 主题..."
-pacman -S --noconfirm --needed grub efibootmgr os-prober
+retry pacman -S --noconfirm --needed grub efibootmgr os-prober
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-THEME_SRC="${SCRIPT_DIR}/grub-themes/hyperfluent"
+THEME_SRC="${REPO_DIR}/grub-themes/hyperfluent"
 THEME_DST="/boot/grub/themes/hyperfluent"
 
 # UEFI / BIOS 自动检测并安装 GRUB
 if [[ -d /sys/firmware/efi ]]; then
-    # 检测 EFI 分区挂载点
     EFI_DIR=""
     for d in /boot /efi /boot/efi; do
         if [[ -d "$d/EFI" ]]; then EFI_DIR="$d"; break; fi
@@ -213,7 +470,12 @@ if [[ -d /sys/firmware/efi ]]; then
         log "✅ GRUB 已安装到 EFI ($EFI_DIR)"
     fi
 else
-    grub-install /dev/nvme0n1 2>/dev/null || warn "GRUB 安装失败（BIOS 模式），请手动指定磁盘"
+    ROOT_DISK=$(lsblk -no pkname "$(findmnt -no source /)" 2>/dev/null)
+    if [ -n "$ROOT_DISK" ]; then
+        grub-install "/dev/${ROOT_DISK}" 2>/dev/null || warn "GRUB 安装失败（BIOS 模式），请手动执行 grub-install /dev/sdX"
+    else
+        warn "无法自动检测根磁盘，请手动执行 grub-install /dev/sdX"
+    fi
 fi
 
 # 复制 hyperfluent 主题
@@ -270,13 +532,16 @@ else
     warn "grub-mkconfig 失败，请手动执行"
 fi
 
-# 🧊 第十一点五步：Ryzen 温控墙 (CPU 功耗/温度限制)
+# 🧊 第十一步：Ryzen 温控墙 (CPU 功耗/温度限制)
 log "配置 Ryzen 5 5500U 温控墙..."
-# 安装 ryzenadj
 if ! command -v ryzenadj &>/dev/null; then
-    pacman -S --noconfirm --needed ryzenadj || warn "ryzenadj 安装失败，跳过温控墙配置"
+    if command -v paru &>/dev/null; then
+        retry sudo -H -u "${REAL_USER}" paru -S --noconfirm --needed ryzenadj
+        log "✅ ryzenadj 已通过 paru 安装 (AUR)"
+    else
+        warn "未找到 paru，跳过 ryzenadj 安装 (手动: paru -S ryzenadj)"
+    fi
 fi
-# 创建温控墙脚本
 cat > /usr/local/bin/ryzenadj-optimization.sh << 'EOF'
 #!/bin/bash
 # Ryzen 5 5500U 优化脚本
@@ -288,12 +553,12 @@ ryzenadj --tctl-temp=90
 # 设置功耗墙 (单位: mW)
 ryzenadj --stapm-limit=25000 --fast-limit=35000 --slow-limit=25000
 
-# 关闭WiFi省电模式
-iw wlan0 set power_save off 2>/dev/null || true
+# 关闭WiFi省电模式 (动态检测无线接口)
+WIFI_IFACE=$(ls /sys/class/net | grep -E '^(wl|wlan)' | head -1)
+[ -n "$WIFI_IFACE" ] && iw "$WIFI_IFACE" set power_save off 2>/dev/null || true
 EOF
 chmod +x /usr/local/bin/ryzenadj-optimization.sh
 
-# 创建 systemd 服务，开机自动应用
 cat > /etc/systemd/system/ryzenadj-optimization.service << 'EOF'
 [Unit]
 Description=Ryzen 5 5500U 温控墙优化
@@ -308,28 +573,49 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 EOF
 
-systemctl enable ryzenadj-optimization.service
+systemctl enable ryzenadj-optimization.service || true
 log "✅ Ryzen 温控墙已配置并设为开机自启"
 
-# 🖼️ 第十一步：壁纸设置
+# 🖼️ 第十二步：壁纸轮换
+log "配置壁纸轮换..."
+# 复制 random-wallpaper-awww.sh（从仓库）
+if [[ -f "${REPO_DIR}/.local/bin/random-wallpaper-awww.sh" ]]; then
+    mkdir -p "${HOME_DIR}/.local/bin"
+    cp "${REPO_DIR}/.local/bin/random-wallpaper-awww.sh" "${HOME_DIR}/.local/bin/"
+    chmod +x "${HOME_DIR}/.local/bin/random-wallpaper-awww.sh"
+    chown -R "${REAL_USER}:${REAL_USER}" "${HOME_DIR}/.local/bin"
+    log "✅ random-wallpaper-awww.sh 已复制到 ~/.local/bin/"
+fi
+
 if [[ -d "${HOME_DIR}/wallpapers" ]]; then
-    log "检测到壁纸目录 ~/wallpapers"
-    WALLPAPER=$(find "${HOME_DIR}/wallpapers" -type f \( -name "*.jpg" -o -name "*.png" \) | shuf -n 1)
-    if [[ -n "$WALLPAPER" ]]; then
-        # 写入 niri 壁纸配置（如使用 swaybg）
-        mkdir -p "${HOME_DIR}/.config"
-        cat > "${HOME_DIR}/.config/swaybg.sh" << EOF
-#!/bin/bash
-while true; do
-    swaybg -i "\$(find "${HOME_DIR}/wallpapers" -type f \( -name "*.jpg" -o -name "*.png" \) | shuf -n 1)" &
-    sleep 3600
-done
-EOF
-        chmod +x "${HOME_DIR}/.config/swaybg.sh"
-        log "✅ 壁纸轮换脚本已生成 (每小时轮换)"
+    log "✅ 检测到壁纸目录 ~/wallpapers"
+    if ! grep -q "random-wallpaper-awww" "${HOME_DIR}/.config/niri/config.kdl" 2>/dev/null; then
+        warn "niri 配置中未找到 random-wallpaper 启动项，请手动在 config.kdl 添加 spawn"
     fi
 else
-    warn "未找到 ~/wallpapers 目录，跳过壁纸配置"
+    warn "未找到 ~/wallpapers 目录，跳过壁纸配置 (可从 GitHub 拉取: 2112992430/awww-)"
+fi
+
+# 🎨 第十三步：Wallpaper Engine (wine + xwinwrap, 仅 X11/i3)
+log "配置 Wallpaper Engine (wine)..."
+if ! command -v xwinwrap &>/dev/null; then
+    info "提示: Wallpaper Engine 需要 AUR 包 xwinwrap-git:"
+    info "  paru -S xwinwrap-git"
+fi
+if [[ ! -d "${HOME_DIR}/wallpaper-engine-using-wine" ]]; then
+    info "提示: 未找到 ~/wallpaper-engine-using-wine，请手动配置:"
+    info "  git clone https://github.com/m3t4f1v3/wallpaper-engine-using-wine ~/wallpaper-engine-using-wine"
+    info "  并按仓库 README 配置 steam 路径、壁纸 ID、项目名"
+else
+    log "✅ 检测到 ~/wallpaper-engine-using-wine"
+    if ! grep -q "wallpaper-engine-using-wine" "${HOME_DIR}/.config/i3/config" 2>/dev/null; then
+        cat >> "${HOME_DIR}/.config/i3/config" << EOF
+
+# Wallpaper Engine via wine (X11 only, xwinwrap desktop layer)
+exec --no-startup-id sleep 10 && ${HOME_DIR}/wallpaper-engine-using-wine/start.sh
+EOF
+        log "✅ i3 已添加 wallpaper-engine 开机自启"
+    fi
 fi
 
 # 🎉 完成
@@ -339,15 +625,24 @@ log "🎉 配置完成！用时 ${ELAPSED} 秒"
 info "建议重启系统: sudo reboot"
 info ""
 info "本次配置包含:"
-info "  ✅ Niri + Waybar 桌面"
-info "  ✅ Fcitx5 中文输入法"
-info "  ✅ Steam + Wine + 游戏优化 (gamemode/mangohud)"
-info "  ✅ WayDroid 安卓模拟器"
-info "  ✅ libvirt 虚拟化"
+info "  ✅ 国内镜像源 (reflector) + ArchLinuxCN + paru"
+info "  ✅ Niri + Waybar + i3 双桌面"
+info "  ✅ Fcitx5 中文输入法 (niri + X11 均已配置)"
+info "  ✅ Steam + Wine + Lutris + 游戏优化 (gamemode/mangohud)"
+info "  ✅ libvirt + QEMU-Full 虚拟化 + virt-viewer + jiasuqi 脚本"
+info "  ✅ 连点器 (ydotool + yautoclick GUI)"
+info "  ✅ 网络工具 (ipset/iptables/iproute2/aria2)"
+info "  ✅ 用户组已同步 (wheel/network/disk/input/kvm/libvirt/tun/dialout/gamemode)"
 info "  ✅ OBS / mpv / VLC 多媒体"
 info "  ✅ btop/fastfetch 监控工具"
 info "  ✅ SSH + NetworkManager 网络服务"
-info "  ✅ 壁纸轮换"
 info "  ✅ GRUB + hyperfluent 主题美化"
+info "  ✅ Ryzen 温控墙 (ryzenadj)"
+info "  ✅ 壁纸轮换 + Wallpaper Engine (i3)"
+info ""
+info "安装后建议手动操作:"
+info "  1. 使用 paru 安装 AUR 工具: paru -S xwinwrap-git (壁纸需要)"
+info "  2. 配置 ~/wallpaper-engine-using-wine (如未 clone)"
+info "  3. 拉取壁纸: git clone https://github.com/2112992430/awww- ~/wallpapers"
 
 exit 0
