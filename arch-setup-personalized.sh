@@ -226,8 +226,9 @@ retry pacman -S --noconfirm --needed \
     mako \
     i3-wm i3status dmenu rofi \
     xorg-xinit xorg-server xorg-xrandr \
-    xdotool ydotool wev \
-    zenity
+    xdotool wev \
+    zenity \
+    zsh zsh-autosuggestions zsh-syntax-highlighting zsh-autocomplete
 
 # --- 克隆 xuhuan-config 仓库（桌面环境安装完成后） ---
 log "克隆 xuhuan-config 仓库..."
@@ -325,19 +326,74 @@ if [[ -d "${REPO_DIR}/.config/miyu" ]]; then
     log "✅ miyu 配置已从仓库复制"
 fi
 
-# --- 安装 yautoclick（GUI 连点器，依赖 ydotool） ---
-log "安装 yautoclick (GUI 连点器, AUR)..."
-if command -v yautoclick >/dev/null 2>&1; then
-    log "✅ yautoclick 已安装"
+# --- 安装 theclicker（连点器，Rust，Wayland+X11 通用，AUR） ---
+log "安装 theclicker (连点器, AUR)..."
+if command -v theclicker >/dev/null 2>&1; then
+    log "✅ theclicker 已安装"
 elif command -v paru >/dev/null 2>&1; then
-    retry sudo -H -u "${REAL_USER}" paru -S --noconfirm --needed yautoclick
-    log "✅ yautoclick 已安装 (AUR)"
+    retry sudo -H -u "${REAL_USER}" paru -S --noconfirm --needed theclicker
+    log "✅ theclicker 已安装 (AUR)"
 else
-    warn "未找到 paru，跳过 yautoclick 安装，请稍后手动执行: paru -S yautoclick"
+    warn "未找到 paru，跳过 theclicker 安装，请稍后手动执行: paru -S theclicker"
 fi
-# 启用 ydotool 服务（yautoclick 后端依赖）
-systemctl enable ydotool.service 2>/dev/null || true
-log "✅ ydotool 服务已启用 (连点器后端)"
+
+# --- 安装 zsh + 复刻当前 zsh 配置（oh-my-zsh + powerlevel10k + 插件） ---
+log "安装 zsh 及组件..."
+# 官方仓库组件已在第三步安装 (zsh zsh-autosuggestions zsh-syntax-highlighting zsh-autocomplete)
+# AUR: zsh-vi-mode + zsh-theme-powerlevel10k
+if command -v paru >/dev/null 2>&1; then
+    retry sudo -H -u "${REAL_USER}" paru -S --noconfirm --needed \
+        zsh-vi-mode zsh-theme-powerlevel10k
+    log "✅ zsh-vi-mode + powerlevel10k 已安装 (AUR)"
+fi
+# zsh-vi-mode 手动安装 fallback（AUR 失败时）
+if [[ ! -d /usr/share/zsh/plugins/zsh-vi-mode ]]; then
+    log "手动安装 zsh-vi-mode..."
+    sudo git clone --depth 1 https://github.com/jeffreytse/zsh-vi-mode /usr/share/zsh/plugins/zsh-vi-mode 2>/dev/null \
+        && log "✅ zsh-vi-mode 已手动安装" \
+        || warn "zsh-vi-mode 安装失败，可稍后手动: git clone https://github.com/jeffreytse/zsh-vi-mode /usr/share/zsh/plugins/zsh-vi-mode"
+fi
+# powerlevel10k 手动安装 fallback（AUR 失败时）
+if [[ ! -d /usr/share/zsh/plugins/powerlevel10k ]]; then
+    log "手动安装 powerlevel10k..."
+    sudo git clone --depth 1 https://github.com/romkatv/powerlevel10k /usr/share/zsh/plugins/powerlevel10k 2>/dev/null \
+        && log "✅ powerlevel10k 已手动安装" \
+        || warn "powerlevel10k 安装失败，可稍后手动: git clone https://github.com/romkatv/powerlevel10k /usr/share/zsh/plugins/powerlevel10k"
+fi
+# oh-my-zsh: 手动 clone 到 ~/.oh-my-zsh（.zshrc 写死此路径，AUR/CN 源包路径不符）
+if [[ ! -d "${HOME_DIR}/.oh-my-zsh/.git" ]]; then
+    log "安装 oh-my-zsh 到 ~/.oh-my-zsh..."
+    sudo -H -u "${REAL_USER}" git clone --depth 1 https://github.com/ohmyzsh/ohmyzsh.git "${HOME_DIR}/.oh-my-zsh" 2>/dev/null \
+        && log "✅ oh-my-zsh 已安装到 ~/.oh-my-zsh" \
+        || warn "oh-my-zsh 安装失败，可稍后手动: git clone https://github.com/ohmyzsh/ohmyzsh.git ~/.oh-my-zsh"
+fi
+
+# --- 复制 zsh 配置（从仓库） ---
+log "复制 zsh 配置 (.zshrc + .p10k.zsh)..."
+if [[ -f "${REPO_DIR}/.zshrc" ]]; then
+    cp "${REPO_DIR}/.zshrc" "${HOME_DIR}/.zshrc"
+    chown "${REAL_USER}:${REAL_USER}" "${HOME_DIR}/.zshrc"
+    log "✅ .zshrc 已从仓库复制"
+else
+    warn "仓库中未找到 .zshrc，跳过"
+fi
+if [[ -f "${REPO_DIR}/.p10k.zsh" ]]; then
+    cp "${REPO_DIR}/.p10k.zsh" "${HOME_DIR}/.p10k.zsh"
+    chown "${REAL_USER}:${REAL_USER}" "${HOME_DIR}/.p10k.zsh"
+    log "✅ .p10k.zsh 已从仓库复制"
+else
+    warn "仓库中未找到 .p10k.zsh，跳过"
+fi
+
+# --- 设置默认 shell 为 zsh ---
+log "设置默认 shell 为 zsh..."
+if command -v zsh >/dev/null 2>&1; then
+    chsh -s /usr/bin/zsh "${REAL_USER}" 2>/dev/null \
+        && log "✅ ${REAL_USER} 默认 shell 已设为 zsh" \
+        || warn "chsh 失败，可稍后手动: chsh -s /usr/bin/zsh ${REAL_USER}"
+else
+    warn "zsh 未安装，跳过默认 shell 设置"
+fi
 
 # 🐱 第四步：输入法 Fcitx5
 log "安装配置 Fcitx5..."
