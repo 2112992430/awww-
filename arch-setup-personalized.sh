@@ -66,35 +66,6 @@ read -r -p "确认开始配置? [y/N] " ans
 # ⏱️ 计时
 START_TIME=$(date +%s)
 
-# 🌏 第零步：DNS 配置（1.1.1.1 / 8.8.8.8）— 必须在所有下载和网络操作之前
-log "配置 DNS (主 1.1.1.1 / 备用 8.8.8.8)..."
-
-# 0.0.1 如果 nmcli 可用，遍历所有连接统一设置
-if command -v nmcli >/dev/null 2>&1; then
-    nmcli -t -f NAME connection show 2>/dev/null | while IFS= read -r conn; do
-        if [[ -n "$conn" ]]; then
-            nmcli connection modify "$conn" \
-                ipv4.dns "1.1.1.1 8.8.8.8" \
-                ipv4.ignore-auto-dns yes 2>/dev/null \
-                && log "  ✅ $conn 已设置 DNS" \
-                || warn "  跳过 $conn (无 ipv4 设置或不可修改)"
-        fi
-    done
-    # 重启 NetworkManager 使 DNS 生效（若服务存在）
-    systemctl restart NetworkManager 2>/dev/null && log "✅ NetworkManager 已重启，DNS 生效" || true
-else
-    # 0.0.2 nmcli 不可用（全新系统未装 NetworkManager），直接写 resolv.conf
-    warn "nmcli 不可用，直接写入 /etc/resolv.conf..."
-    cp /etc/resolv.conf /etc/resolv.conf.bak 2>/dev/null || true
-    cat > /etc/resolv.conf << 'EOF'
-nameserver 1.1.1.1
-nameserver 8.8.8.8
-EOF
-    log "✅ /etc/resolv.conf 已直接写入 1.1.1.1 / 8.8.8.8 (备份: /etc/resolv.conf.bak)"
-fi
-
-log "✅ DNS 配置完成，后续所有下载/网络操作将使用 1.1.1.1 / 8.8.8.8"
-
 # 🌏 第零步：ArchLinuxCN 源 + 镜像源 + paru
 log "配置 ArchLinuxCN 源与镜像源..."
 
