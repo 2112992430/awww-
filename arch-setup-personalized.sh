@@ -145,6 +145,7 @@ retry pacman -Sy --noconfirm archlinux-keyring
 retry pacman -Syu --noconfirm --needed \
     bash bash-completion \
     git vim curl wget unzip zip p7zip \
+    fzf ripgrep zsh-completions \
     btrfs-progs \
     linux-zen linux-zen-headers \
     linux-lts linux-lts-headers \
@@ -603,9 +604,22 @@ EOF
 systemctl enable ryzenadj-optimization.service || true
 log "✅ Ryzen 温控墙已配置并设为开机自启"
 
-# 🖼️ 第十二步：壁纸轮换
-log "配置壁纸轮换..."
-# 复制 random-wallpaper-awww.sh（从仓库）
+# 🖼️ 第十二步：壁纸 (从仓库复制 + 轮换)
+log "配置壁纸与轮换..."
+
+# 12.1 从仓库复制壁纸到 ~/wallpapers（仓库内有莫宁女仆系列 11 张）
+if [[ -d "${REPO_DIR}/wallpapers" ]]; then
+    mkdir -p "${HOME_DIR}/wallpapers"
+    cp -r "${REPO_DIR}/wallpapers/." "${HOME_DIR}/wallpapers/"
+    chown -R "${REAL_USER}:${REAL_USER}" "${HOME_DIR}/wallpapers"
+    log "✅ 壁纸已从仓库复制到 ~/wallpapers ($(ls "${HOME_DIR}/wallpapers" | wc -l) 张)"
+elif [[ -d "${HOME_DIR}/wallpapers" ]]; then
+    log "✅ 检测到已有壁纸目录 ~/wallpapers"
+else
+    warn "仓库与本地均无壁纸目录，跳过壁纸配置 (可从 GitHub 拉取: 2112992430/awww-)"
+fi
+
+# 12.2 复制 random-wallpaper-awww.sh（从仓库）
 if [[ -f "${REPO_DIR}/.local/bin/random-wallpaper-awww.sh" ]]; then
     mkdir -p "${HOME_DIR}/.local/bin"
     cp "${REPO_DIR}/.local/bin/random-wallpaper-awww.sh" "${HOME_DIR}/.local/bin/"
@@ -614,20 +628,23 @@ if [[ -f "${REPO_DIR}/.local/bin/random-wallpaper-awww.sh" ]]; then
     log "✅ random-wallpaper-awww.sh 已复制到 ~/.local/bin/"
 fi
 
+# 12.3 niri 配置中确认壁纸轮换启动项
 if [[ -d "${HOME_DIR}/wallpapers" ]]; then
-    log "✅ 检测到壁纸目录 ~/wallpapers"
     if ! grep -q "random-wallpaper-awww" "${HOME_DIR}/.config/niri/config.kdl" 2>/dev/null; then
         warn "niri 配置中未找到 random-wallpaper 启动项，请手动在 config.kdl 添加 spawn"
     fi
-else
-    warn "未找到 ~/wallpapers 目录，跳过壁纸配置 (可从 GitHub 拉取: 2112992430/awww-)"
 fi
 
 # 🎨 第十三步：Wallpaper Engine (wine + xwinwrap, 仅 X11/i3)
 log "配置 Wallpaper Engine (wine)..."
 if ! command -v xwinwrap &>/dev/null; then
-    info "提示: Wallpaper Engine 需要 AUR 包 xwinwrap-git:"
-    info "  paru -S xwinwrap-git"
+    if command -v paru >/dev/null 2>&1; then
+        retry sudo -H -u "${REAL_USER}" paru -S --noconfirm --needed xwinwrap-git \
+            && log "✅ xwinwrap-git 已通过 paru 安装 (AUR)" \
+            || warn "xwinwrap-git 安装失败，可稍后手动: paru -S xwinwrap-git"
+    else
+        warn "未找到 paru，跳过 xwinwrap-git 安装 (手动: paru -S xwinwrap-git)"
+    fi
 fi
 if [[ ! -d "${HOME_DIR}/wallpaper-engine-using-wine" ]]; then
     info "提示: 未找到 ~/wallpaper-engine-using-wine，请手动配置:"
@@ -645,6 +662,31 @@ EOF
     fi
 fi
 
+# 🛠️ 第十四步：鸣潮启动器修复脚本 (wuwalauncherfix.sh)
+log "配置鸣潮启动器修复脚本..."
+# 依赖 bbe (binary block editor)，wuwalauncherfix.sh 用它修补 launcher_main.dll
+if command -v bbe >/dev/null 2>&1; then
+    log "✅ bbe 已安装"
+else
+    if command -v paru >/dev/null 2>&1; then
+        retry sudo -H -u "${REAL_USER}" paru -S --noconfirm --needed bbe \
+            && log "✅ bbe 已通过 paru 安装" \
+            || warn "bbe 安装失败，可稍后手动: paru -S bbe"
+    else
+        warn "未找到 paru，跳过 bbe 安装 (手动: paru -S bbe)"
+    fi
+fi
+# 复制 wuwalauncherfix.sh 到 ~/.local/bin/
+if [[ -f "${REPO_DIR}/wuwalauncherfix.sh" ]]; then
+    mkdir -p "${HOME_DIR}/.local/bin"
+    cp "${REPO_DIR}/wuwalauncherfix.sh" "${HOME_DIR}/.local/bin/"
+    chmod +x "${HOME_DIR}/.local/bin/wuwalauncherfix.sh"
+    chown -R "${REAL_USER}:${REAL_USER}" "${HOME_DIR}/.local/bin"
+    log "✅ wuwalauncherfix.sh 已复制到 ~/.local/bin/ (鸣潮启动器修复)"
+else
+    warn "仓库中未找到 wuwalauncherfix.sh，跳过"
+fi
+
 # 🎉 完成
 END_TIME=$(date +%s)
 ELAPSED=$((END_TIME - START_TIME))
@@ -657,7 +699,8 @@ info "  ✅ Niri + Waybar + i3 双桌面"
 info "  ✅ Fcitx5 中文输入法 (niri + X11 均已配置)"
 info "  ✅ Steam + Wine + Lutris + 游戏优化 (gamemode/mangohud)"
 info "  ✅ libvirt + QEMU-Full 虚拟化 + virt-viewer + jiasuqi 脚本"
-info "  ✅ 连点器 (ydotool + yautoclick GUI)"
+info "  ✅ 连点器 (theclicker, Wayland+X11 通用)"
+info "  ✅ 鸣潮启动器修复脚本 (wuwalauncherfix.sh + bbe)"
 info "  ✅ 网络工具 (ipset/iptables/iproute2/aria2)"
 info "  ✅ 用户组已同步 (wheel/network/disk/input/kvm/libvirt/tun/dialout/gamemode)"
 info "  ✅ OBS / mpv / VLC 多媒体"
@@ -668,8 +711,8 @@ info "  ✅ Ryzen 温控墙 (ryzenadj)"
 info "  ✅ 壁纸轮换 + Wallpaper Engine (i3)"
 info ""
 info "安装后建议手动操作:"
-info "  1. 使用 paru 安装 AUR 工具: paru -S xwinwrap-git (壁纸需要)"
-info "  2. 配置 ~/wallpaper-engine-using-wine (如未 clone)"
-info "  3. 拉取壁纸: git clone https://github.com/2112992430/awww- ~/wallpapers"
+info "  1. 配置 ~/wallpaper-engine-using-wine (如未 clone: git clone https://github.com/m3t4f1v3/wallpaper-engine-using-wine)"
+info "  2. 鸣潮启动器修复: ~/.local/bin/wuwalauncherfix.sh (需 wine 已装鸣潮)"
+info "  3. 若仓库壁纸不足，可额外拉取: git clone https://github.com/2112992430/awww- ~/wallpapers-extra"
 
 exit 0
