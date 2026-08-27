@@ -188,19 +188,28 @@ retry pacman -S --noconfirm --needed \
     foot \
     kitty \
     qt5-base qt5-wayland qt6-base qt6-wayland \
-    xwayland \
     libinput \
     mesa vulkan-radeon libva-mesa-driver \
-    xf86-video-amdgpu vulkan-mesa-layer vulkan-tools libva-utils \
+    xf86-video-amdgpu vulkan-tools libva-utils \
     xdg-desktop-portal xdg-desktop-portal-gnome \
     polkit polkit-kde-agent \
     swaybg grim slurp wl-clipboard \
     mako \
     i3-wm i3status dmenu rofi \
-    xorg-xinit xorg-server xorg-xrandr \
-    xdotool wev \
+    xorg-xinit xorg-server xorg-xrandr xorg-xwayland \
     zenity \
-    zsh zsh-autosuggestions zsh-syntax-highlighting zsh-autocomplete
+    zsh zsh-autosuggestions zsh-syntax-highlighting zsh-autocomplete awww
+
+# --- 安装 xwayland-satellite (AUR, Wayland 下的 XWayland 卫星实现) ---
+log "安装 xwayland-satellite (AUR)..."
+if command -v xwayland-satellite >/dev/null 2>&1; then
+    log "✅ xwayland-satellite 已安装"
+elif command -v paru >/dev/null 2>&1; then
+    retry sudo -H -u "${REAL_USER}" paru -S --noconfirm --needed xwayland-satellite
+    log "✅ xwayland-satellite 已通过 paru 安装 (AUR)"
+else
+    warn "未找到 paru，跳过 xwayland-satellite 安装 (手动: paru -S xwayland-satellite)"
+fi
 
 # --- 克隆 xuhuan-config 仓库（桌面环境安装完成后） ---
 log "克隆 xuhuan-config 仓库..."
@@ -298,16 +307,26 @@ if [[ -d "${REPO_DIR}/.config/miyu" ]]; then
     log "✅ miyu 配置已从仓库复制"
 fi
 
-# --- 安装 theclicker（连点器，Rust，Wayland+X11 通用，AUR） ---
-log "安装 theclicker (连点器, AUR)..."
-if command -v theclicker >/dev/null 2>&1; then
-    log "✅ theclicker 已安装"
-elif command -v paru >/dev/null 2>&1; then
-    retry sudo -H -u "${REAL_USER}" paru -S --noconfirm --needed theclicker
-    log "✅ theclicker 已安装 (AUR)"
+# --- 安装 ydotool（连点器/按键模拟，走内核 uinput 接口，Wayland+X11 通用） ---
+log "安装 ydotool (连点器)..."
+retry pacman -S --noconfirm --needed ydotool
+
+# ydotool 通过 ydotoold 守护进程写入 /dev/uinput，必须启动守护进程才能工作
+# Arch 打包为【用户级】服务: /usr/lib/systemd/user/ydotool.service
+# 配套 udev 规则将 /dev/uinput 设为 input 组 0660，本脚本第二步已把用户加入 input 组
+YDOTOOL_UID="$(id -u "${REAL_USER}")"
+if sudo -H -u "${REAL_USER}" env XDG_RUNTIME_DIR="/run/user/${YDOTOOL_UID}" \
+    systemctl --user enable --now ydotool.service 2>/dev/null; then
+    log "✅ ydotool 已安装, 用户级 ydotool.service 已设为自启"
 else
-    warn "未找到 paru，跳过 theclicker 安装，请稍后手动执行: paru -S theclicker"
+    warn "未能启用用户级 ydotool.service (该用户可能暂无活动会话)，首次登录后请手动执行:"
+    warn "  systemctl --user enable --now ydotool"
 fi
+info "连点器用法示例 (普通用户即可):"
+info "  ydotool click -r 100 -d 100 0xC0   # 左键连点 100 次, 每次间隔 100ms"
+info "  ydotool click 0xC0                 # 左键单击一次"
+info "  ydotool click 0xC1                 # 右键单击"
+info "注意: 若报无法连接 socket (~/.ydotool_socket), 请先启动服务并重新登录使 input 组生效"
 
 # --- 安装 zsh + 复刻当前 zsh 配置（oh-my-zsh + powerlevel10k + 插件） ---
 log "安装 zsh 及组件..."
@@ -448,8 +467,7 @@ retry pacman -S --noconfirm --needed \
     dnsutils iputils net-tools openssh rsync \
     ipset iptables iproute2 \
     gzip bzip2 xz zstd \
-    aria2 \
-    neofetch
+    aria2
 
 # 🌐 第八步：网络与主机名
 log "配置网络..."
@@ -699,7 +717,7 @@ info "  ✅ Niri + Waybar + i3 双桌面"
 info "  ✅ Fcitx5 中文输入法 (niri + X11 均已配置)"
 info "  ✅ Steam + Wine + Lutris + 游戏优化 (gamemode/mangohud)"
 info "  ✅ libvirt + QEMU-Full 虚拟化 + virt-viewer + jiasuqi 脚本"
-info "  ✅ 连点器 (theclicker, Wayland+X11 通用)"
+info "  ✅ 连点器 (ydotool, Wayland+X11 通用)"
 info "  ✅ 鸣潮启动器修复脚本 (wuwalauncherfix.sh + bbe)"
 info "  ✅ 网络工具 (ipset/iptables/iproute2/aria2)"
 info "  ✅ 用户组已同步 (wheel/network/disk/input/kvm/libvirt/tun/dialout/gamemode)"
