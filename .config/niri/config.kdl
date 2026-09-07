@@ -273,6 +273,7 @@ layout {
 // See the binds section below for more spawn examples.
 
 // This line starts waybar, a commonly used bar for Wayland compositors.
+spawn-sh-at-startup "dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP=niri & /usr/lib/xdg-desktop-portal-gnome"
 spawn-at-startup "waybar"
 spawn-at-startup "sh" "-c" "/home/xuhuan/.local/bin/random-wallpaper-awww.sh"
 spawn-sh-at-startup "we-layerd run --config ~/.config/we-layerd/config.toml"
@@ -281,11 +282,12 @@ spawn-at-startup "niriusd"
 spawn-at-startup "awww-daemon"
 spawn-at-startup "copyq"
 spawn-at-startup "/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1"
-spawn-at-startup "mako"
+spawn-at-startup "swaync"
 spawn-at-startup "fcitx5"
 spawn-at-startup "~/.config/niri/scripts/swayidle.sh"
 spawn-at-startup "sh" "-c" "systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XDG_CURRENT_DESKTOP && systemctl --user restart xdg-desktop-portal"
 spawn-at-startup "xwayland-satellite"
+spawn-at-startup "sh" "-c" "~/.local/bin/waydroid-session-autostart.sh"
 spawn-sh-at-startup "export DISPLAY=:0"
 // To run a shell command (with variables, pipes, etc.), use spawn-sh-at-startup:
 // spawn-sh-at-startup "qs -c ~/source/qs/MyAwesomeShell"
@@ -349,13 +351,7 @@ window-rule {
     open-floating true
 }
 window-rule {
-    // This app-id regular expression will work for both:
-    // - host Firefox (app-id is "firefox")
-    // - Flatpak Firefox (app-id is "org.mozilla.firefox")
-    match app-id=r#"firefox$"# title="^Picture-in-Picture$"
-    match app-id="SPlayer"
-    match app-id="org.vinegarhq.Sober"
-    match app-id="waypaper"
+    match app-id="splayer"
     open-floating true
 }
 
@@ -404,7 +400,7 @@ binds {
     Mod+Shift+4 { move-window-to-workspace 4; }
     // Suggested binds for running programs: terminal, app launcher, screen locker.
     Mod+T hotkey-overlay-title="Open a Terminal: alacritty" { spawn "kitty"; }
-    Alt+Space hotkey-overlay-title="Run an Application: fuzzel" { spawn "fuzzel"; }
+    Alt+Space hotkey-overlay-title="Run an Application: rofi" { spawn "rofi" "-show" "drun"; }
     Super+Alt+L hotkey-overlay-title="Lock the Screen: swaylock" { spawn "swaylock"; }
     // Use spawn-sh to run a shell command. Do this if you need pipes, multiple commands, etc.
     // Note: the entire command goes as a single argument. It's passed verbatim to `sh -c`.
